@@ -1,0 +1,705 @@
+options{
+  FORCE_LA_CHECK = true;
+  COMMON_TOKEN_ACTION = true;
+  static = false;
+}
+
+PARSER_BEGIN(Tool)
+package parser;
+import java.io.FileInputStream;
+import java.util.ArrayList;
+import codeGeneration.CodeGenerationMain;
+import states.*;
+
+public class Tool
+{
+	
+	  public static void main( String[] args ){
+                try{
+                                System.out.println("Parsing Properties...");
+                        System.setIn(new FileInputStream(args[0]));
+                        Tool parser = new Tool( System.in );
+                        Program n = parser.Program();
+                        System.out.println("Parsing complete...");
+                        System.out.println("Starting Code Generation..");
+                        CodeGenerationMain code = new CodeGenerationMain();
+                        code.generateKernelSideCode(n,Integer.parseInt(args[1]));
+                        code.generateApplicationSideCode(n,Integer.parseInt(args[1]));
+                        code.generateTimerFrameworkCode(n);
+                        System.out.println("Code Generation finished successfully..");
+                }catch(Exception e){
+                        System.out.println("Problema: "+e);
+                }
+        }
+}
+
+PARSER_END(Tool)
+
+<DEFAULT,IMPORTSS> SKIP:{
+	 " " 
+	| "\n"
+	| "\r"
+	| "r\n"
+	| "\t"
+	| < "//" (~[ "\n", "\r" ])
+			*("\n" | "\r" | "\r\n") >
+	| < "/*" (~[ "*" ])*
+			"*"(~[ "/" ] (~[ "*" ])*
+			"*")*"/" >
+}
+
+<DEFAULT,IMPORTSS> TOKEN:{
+	 < OPAR   : "(" > 
+	|< CPAR   : ")" >	
+	|< OBR    : "{" > {if(toReadEverything || actionsOrConditionsBracket) SwitchTo(BLOCK);
+						if(!toReadEverything && actionsOrConditions && actionsOrConditionsName ){
+							actionsOrConditionsBracket = true;
+						}}
+	|< CBR    : "}" >{	actionsOrConditionsBracket = false;
+						actionsOrConditionsName = false;}
+	|< AT     : "@" >
+	|< OSBR   : "[" >
+	|< CSBR   : "]" >
+	|< COL    : ":" >
+	|< SCOL   : ";" >
+	|< COMMA  : "," >
+	|< FSTP   : "." >
+	|< EQ     : "=" >
+	|< BNDS   : "<" >
+	|< BNDE   : ">" > {SwitchTo(DEFAULT);}
+	|< BNDEBNDE: ">>" > {if(actionsOrConditions) toReadEverything = true;}
+	|< SLSH   : "/" >
+	|< FSLSH  : "\\" >
+	|< ANDAND : "&&"> {if(actionsOrConditions) toReadEverything = true;}
+	|< AND    : "&" >
+	|< OROR   : "||" >
+ 	|< OR     : "|" >
+}
+
+<DEFAULT,IMPORTSS> TOKEN:{
+	< NULL	      : "null" >
+	|< THIS       : "this" >
+	|< SUPER      : "super" >
+	|< RULES      : "rules" >
+	|< IMPORT     : "import" >
+	|< GLOBAL     : "global" >
+	|< TIMERS     : "timers" >
+	|< STATES     : "states" >
+	|< EVENTS     : "events" >
+	|< STATESAVE  : "saveWith" > {toReadEverything = true;}
+	|< STATELOAD  : "loadWith" > {toReadEverything = true;}
+	|< ACTIONS    : "actions"> {actionsOrConditions = true;}
+	|< IMPORTS    : "imports" >
+	|< INCLUDE    : "#include" > {SwitchTo(IMPORTSS);}
+	|< STATEDEC   : "declaration" > {toReadEverything = true;}
+	|< CONDITIONS : "conditions" > {actionsOrConditions = true;}
+	|< INSTANCEOF : "instanceof" > 
+	|< KERNEL     : "kernelSide" > {if(actionsOrConditions) toReadEverything = true;}
+	|< TIMEROFF   : "RV:timerOff" >
+	|< TIMEUNDER  : "RV:timeUnder" > 
+	|< TIMERPAUSE : "RV:timerPause" >
+	|< TIMERESUME : "RV:timerResume" >
+	|< TIMERESET  : "RV:timerReset" >
+	|< APP        : "applicationSide" > {if (actionsOrConditions) toReadEverything = true;}
+	|< WHERE	  : "where"> {toReadEverything = true;} 
+	|< UPONRETURNING : "uponReturning" >
+	|< STR   	  : "*" >
+	|< STRUCT 	  : "struct" >
+	|< EVENTCAPTURE : "before" | "after" >
+}
+
+<DEFAULT,IMPORTSS> TOKEN:{
+	 < #DIGIT   : ["0" - "9"] >
+	|< INTEGER  : (< DIGIT >)+ >	
+	|< #LETTER  : ["a"-"z"] | ["A"-"Z"] >
+	|< STRING   : <LETTER> ( <LETTER> | <INTEGER> | "_")* > {if(actionsOrConditions)actionsOrConditionsName = true; }
+}
+
+<BLOCK> TOKEN: {
+	 < BOBR  : "{"> {openBracketCount++;}
+	|< BCBR  : "}" > { if(openBracketCount == 0) {
+						SwitchTo(DEFAULT); 
+						toReadEverything = false;
+						actionsOrConditionsBracket = false;
+						actionsOrConditionsName = false;
+					 } else openBracketCount--;}
+	|< BLK   : ~[] > 
+}
+
+<IMPORTSS> TOKEN: {
+	<HEADER : ".h"> 
+}
+
+TOKEN_MGR_DECLS:{
+	static boolean toReadEverything = false;
+	static boolean actionsOrConditions = false;
+	static boolean actionsOrConditionsBracket = false;
+	static boolean actionsOrConditionsName = false;
+	static int openBracketCount = 0;
+	
+	void CommonTokenAction(Token t){
+		//System.out.println("Token: "+t.toString());
+	}
+}
+//****************************************FIN************************************************************
+
+//****************************************BLOCK READING**************************************************
+
+String Blck():{
+	Token t;
+	String temp;
+	String text= "";
+}{
+	
+	(t = <BLK> {text += t.toString();}
+	|   (
+			t = <BOBR> {text += t.toString();}
+				temp = Blck() {text += temp;}
+			t = <BCBR> {text += t.toString();}
+		)
+	)*
+	{return text;}
+}
+
+String Block():{
+	String allText;
+}{
+	<OBR> 
+		allText = Blck()
+	<BCBR>
+		
+	{return allText;}
+}
+
+//***********************************************END*****************************************************
+
+//***********************************************Imports Section*****************************************
+ 
+String ImportsKernelIncludes():
+{Token t; String imprt = "";}{
+	(<INCLUDE> <BNDS> 
+		t= < STRING > {imprt += "include <"+t.toString();} 
+			(<SLSH> t=< STRING >{imprt += "/"+t.toString();} )* 
+				<HEADER> <BNDE>{imprt += ".h> \n";})
+	{return imprt;}
+}
+
+String ImportsAppllicationImports():
+{Token t; String imprt = "";}{
+	<IMPORT>{imprt += "import ";} 
+		t = <STRING> {imprt += t.toString();}
+			(<FSTP> t = <STRING>{imprt+= "."+t.toString();})* 
+				<SCOL>{imprt+="; \n";}
+	{return imprt;}
+}
+
+void ImportsKernelSide(Imports imp):
+{String imports = "";}{
+	<KERNEL> <OBR>
+		(imports = ImportsKernelIncludes(){imp.addKernelImport(imports);})*
+	<CBR>
+}
+	
+void ImportsApplicationSide(Imports imp):
+{String imports = "";}{
+	<APP> <OBR>
+		(imports = ImportsAppllicationImports()
+			{imp.addApplicationImport(imports);})*
+	<CBR>
+}							
+
+Imports ImportsMain():{
+	Imports imp;
+}{
+	{imp = new Imports();}
+	
+	<IMPORTS> <OBR>
+		ImportsKernelSide(imp) 
+		ImportsApplicationSide(imp)
+	< CBR >
+	{return imp;}
+}								
+
+
+//Timers SECTION
+String Timers():{
+	Token t;
+	String timerName;
+}{
+	(t = <STRING>){timerName = t.toString();} <SCOL>
+	{return timerName;}
+}
+
+Timers TimersMain():{
+	String timerName;
+	Timers timers;
+}{				
+	{timers = new Timers();}
+	<TIMERS> <OBR>
+		(<APP> <OBR> (timerName = Timers(){timers.addTimerNameApp(timerName);})* <CBR>)?
+		(<KERNEL>{throw new Exception("Warning: KernelSide timers are not yet implemented and will be ignored...");} <OBR> (timerName = Timers(){timers.addTimerNameKernel(timerName);})* <CBR>)?
+	<CBR>
+	{return timers;}
+}
+//***********************************************END*****************************************************
+
+//***********************************************States SECTION******************************************
+
+State States():{
+	String temp;
+	Token t;
+	State state;
+}{
+	{state = new State();}
+	temp = Type(){state.setStateType(temp);} t = <STRING>{state.setStateName(t.toString());}<EQ> <OBR> 	
+		(<STATEDEC>	temp = Block(){state.setStateDeclaration(temp);})
+		(<STATESAVE> temp = Block(){state.setStateSave(temp);})?
+		(<STATELOAD> temp = Block(){state.setStateLoad(temp);})?
+	<CBR>
+	{return state;}
+}
+
+States StatesMain():{
+	State state;
+	States states;
+}{
+	{states = new States();}
+	<STATES> <OBR>
+		(<APP> <OBR> (state = States(){states.addApplicationSideState(state);})* <CBR>)?
+		(<KERNEL> <OBR> (state = States(){states.addKernelSideState(state);})* <CBR>)?
+	<CBR>
+	{return states;}
+}
+
+//***********************************************END*****************************************************
+
+//***********************************************Events Section*****************************************************
+
+String EventName():{
+	Token t;
+	String eventName;
+}{
+	t = <STRING>{eventName = t.toString();} 
+	{return eventName;}
+}
+
+String ClassName():{
+	Token t;
+	String className = "";
+}{
+	t = <STRING>{className = t.toString();}	
+	{return className;}
+}
+
+String Type():{
+	Token t;
+	String type= "";
+}{
+	(
+		(<STRUCT> t = <STRING> {type = "struct "+t.toString();})
+		|(t= <STRING> {type = t.toString();})
+	)
+	{return type;}
+}
+
+Parameter Parameters():{
+	String tt;
+	Token t;
+	Parameter parameter;
+}{
+	{parameter = new Parameter();}
+	(
+	 ( 
+	  (tt = Type(){parameter.addParameterType(tt);} 
+	   t = <STRING>{parameter.addParameterName(t.toString());} 
+	  )| 
+	  t = <STR> {parameter.setStar();} 
+	 ) 
+	 (<COMMA>
+	  (
+	   (tt = Type(){parameter.addParameterType(tt);}
+	    t = <STRING>{parameter.addParameterName(t.toString());}
+	   )| 
+	  t = <STR> {parameter.setStar();}  
+	  ) 
+	 )*
+	)?
+	{return parameter;}
+}
+
+String CallParameters():{
+	Token t;
+	String param = "";
+}{
+	(t = <STRING>{param+= t.toString();} (<COMMA> t = <STRING>{param+=","+ t.toString();})*)?
+	{return param;}
+}
+
+
+String EventNameCall():{
+	Token t;
+	String temp;
+	String eventName;
+}{
+	t = <STRING>{eventName = t.toString();} <OPAR> temp = CallParameters() <CPAR>
+	{eventName += "("+temp+")"; return eventName;}
+}
+
+
+String EventInstance():{
+	Token t;
+	String eventInstance= "";
+}{
+	( (<STR> {eventInstance += "*";})
+	|( t = <STRING>) {eventInstance += t.toString();})
+	
+	{return eventInstance;}
+}
+
+void EventsOptional(Event event):{
+	Token t;
+	String whereBlock;
+}{
+	(<WHERE> whereBlock = Block() {event.setWhereCode(whereBlock);})? 
+	(<UPONRETURNING> <OPAR> (t = <STRING>{event.setUponReturningCode(t.toString());}) <CPAR>)?
+}
+
+Event EventCollection():{
+	Token t;
+	String temp;
+	Parameter parameters;
+	Event event;
+	EventRepresentation eventRep;
+}{
+	{event = new Event();}
+	
+	(t = <EVENTCAPTURE> {event.setEventCapture(t.toString());})? 
+	({eventRep = new EventRepresentation();}
+		(LOOKAHEAD(2)
+			(
+				temp = ClassName(){eventRep.setClassName(temp);} 
+				temp = EventInstance(){eventRep.setInstanceName(temp);} 
+				<FSTP> 
+				temp = EventName(){eventRep.setEventName(temp);}
+				<OPAR> parameters = Parameters() <CPAR>
+				{eventRep.addParameter(parameters);}
+			)
+			| (temp = EventNameCall(){eventRep.setEventName(temp);eventRep.isSpecialEvent = true;})
+		)
+	)
+	{event.addEventRepresentation(eventRep);} 
+		
+	(<OR>
+	   	(t = <EVENTCAPTURE> {event.setEventCapture(t.toString());})? 
+		({eventRep = new EventRepresentation();}
+			(LOOKAHEAD(2)(
+				temp = ClassName(){eventRep.setClassName(temp);} 
+				temp = EventInstance(){eventRep.setInstanceName(temp);} 
+				<FSTP> 
+				temp = EventName(){eventRep.setEventName(temp);}
+				<OPAR> parameters = Parameters() <CPAR>
+				{eventRep.addParameter(parameters);}
+			)
+			| (temp = EventNameCall(){eventRep.setEventName(temp);eventRep.isSpecialEvent = true;}))
+		)
+		{event.setSpecialEvent(); event.addEventRepresentation(eventRep);} 
+    )*
+     
+	{return event;}
+}
+
+Event TimerEventDef(Timers timers):{
+	String temp;
+	int timerValue;
+	Event event;
+	EventRepresentation eventRep;
+}{
+	{eventRep = new EventRepresentation();
+	event = new Event();}
+	
+	temp = TimerName() {eventRep.setClassName(temp);}
+	((<AT> timerValue = TimerValue() {timers.addTimerValue(temp,timerValue); eventRep.setInstanceName("@"); eventRep.setEventName(Integer.toString(timerValue));})| 
+		("@%" timerValue = TimerValue() {timers.addTimerValue(temp,timerValue); eventRep.setInstanceName("@%"); eventRep.setEventName(Integer.toString(timerValue));}))
+
+	{eventRep.isTimerEvent = true;
+	 event.addEventRepresentation(eventRep);
+	 return event;}
+}
+
+void EventDefined(Events events, Timers timers):{
+	String eventName = "";
+	Parameter parameters;
+	Event event = null;
+}{
+	(eventName = EventName()) <OPAR> parameters = Parameters() <CPAR> <EQ> <OBR>		
+		(LOOKAHEAD(2)
+		 event = EventCollection() {
+			{event.setEventName(eventName);
+			 event.setEventParameters(parameters);
+			 events.addEvent(event);}
+		 } | event = TimerEventDef(timers){
+		 	{event.setEventName(eventName);
+			 event.setEventParameters(parameters); //awnekk
+		 	 events.addEvent(event);}
+		 } 
+		)
+	<CBR> EventsOptional(event)
+}
+
+Events EventsMain(Timers timers):{
+	Events events;
+}{
+	{events = new Events();}
+	<EVENTS> <OBR>
+		(EventDefined(events,timers))*
+	<CBR>
+	{return events;}
+}
+
+//***********************************************END*****************************************************
+
+//***********************************************Conditions Section**************************************
+
+String ConditionName():{
+	Token t;
+	String conditionName;
+}{
+	t = <STRING> { conditionName = t.toString();}
+	{return conditionName;}
+}
+
+String TimerName():{
+	Token t;
+	String timerName;
+}{
+	t = <STRING> {timerName = t.toString();}
+	{return timerName;}
+}
+
+int TimerValue():{
+	Token t;
+	int timerValue;	
+}{
+	t= <INTEGER>{timerValue = Integer.parseInt(t.toString());}	
+	{return timerValue;}
+}
+
+ConditionNormal ConditionsDef():{
+	Token t;
+	String text = "";
+	ConditionNormal normalCondition = null;
+	
+}{ 	 
+	{normalCondition = new ConditionNormal();}
+	
+	(
+		 (<APP> text = Block(){normalCondition.setApplicationSideConditions(text);})
+		|(<KERNEL> text = Block(){normalCondition.setKernelSideConditions(text);} (<ANDAND> <APP> text = Block(){normalCondition.setApplicationSideConditions(text);})?)
+		|(text = Block(){normalCondition.setKernelSideConditions(text);} <ANDAND> text = Block(){normalCondition.setApplicationSideConditions(text);})
+		
+	)
+	
+	{return normalCondition;}
+}
+
+ConditionBasedOnTimers TimerConditions():{
+	ConditionBasedOnTimers timerCondition = null;
+	String timerName;
+	int timerValue;
+}{
+	{timerCondition = new ConditionBasedOnTimers();}
+	
+	<TIMEUNDER> <OPAR> timerName = TimerName() <COMMA> timerValue = TimerValue() <CPAR>
+	
+	{
+		timerCondition.setTimerName(timerName);
+		timerCondition.setConditionValue(timerValue);
+		return timerCondition;
+	}
+}
+
+void ConditionsDefined(Conditions conditions):{
+	String conditionName;
+	ConditionNormal normalCondition;
+	ConditionBasedOnTimers timerCondition;
+}{
+	(conditionName = ConditionName()) <EQ> <OBR>
+		  ( timerCondition = TimerConditions(){
+		  		timerCondition.setConditionName(conditionName);
+		  		conditions.addConditionBasedOnTimers(timerCondition);
+		  	} | 
+		  	normalCondition = ConditionsDef(){
+		  		normalCondition.setConditionName(conditionName);
+		  		conditions.addNormalCondition(normalCondition);
+		  	} )
+	<CBR>
+}
+
+Conditions ConditionsMain():{
+	Conditions conditions;
+}{
+	{conditions = new Conditions();}
+	<CONDITIONS> <OBR>
+		(ConditionsDefined(conditions))*
+	<CBR>
+	{ToolTokenManager.actionsOrConditions = false; return conditions;}
+}
+
+//***********************************************END*****************************************************
+
+//**********************************************Actions Section******************************************
+
+String ActionName():{
+	Token t;
+	String actionName;
+}{
+	t = <STRING> {actionName = t.toString();}
+	{return actionName;}
+}
+
+Action ActionsDef():{
+	String actionBlock;
+	Action normalAction = null;
+}{
+	{normalAction = new Action();}(
+	 (<APP> actionBlock = Block(){normalAction.setApplicationSideAction(actionBlock);})
+	|(<KERNEL> actionBlock = Block(){normalAction.setKernelSideAction(actionBlock);} (<BNDEBNDE> <APP> actionBlock =Block(){normalAction.setApplicationSideAction(actionBlock);})?)
+	|(actionBlock =Block(){normalAction.setKernelSideAction(actionBlock);} ">>" actionBlock =Block(){normalAction.setApplicationSideAction(actionBlock);})
+	)
+	{return normalAction;}
+}
+
+Action TimerActionDef():{
+	Token t; 
+	String name;
+	String action;
+	Action normalAction;
+}{
+	{normalAction = new Action();}
+	( (t = <TIMERPAUSE>{action = t.toString();} <OPAR> name =TimerName() <CPAR>) 
+	|(t = <TIMERESUME>{action = t.toString();} <OPAR> name =TimerName() <CPAR>) 
+	|(t = <TIMERESET>{action = t.toString();} <OPAR> name =TimerName() <CPAR>) 
+	|(t = <TIMEROFF>{action = t.toString();} <OPAR> name = TimerName() <CPAR>))
+	{action+= "("+name+")";normalAction.setTimerAction(action);
+	return normalAction;}
+}
+
+void ActionsDefined(Actions actions):{
+	String actionName;
+	Action normalAction;
+}{
+	(actionName = ActionName()) <EQ> <OBR> 
+		( normalAction = ActionsDef() | 
+		  normalAction = TimerActionDef() 
+		)
+	<CBR>
+	{normalAction.setActionName(actionName);
+	actions.addNormalAction(normalAction);}
+}
+
+Actions ActionsMain():{
+	Actions actions;
+}{
+	{actions = new Actions();}
+	
+	<ACTIONS> <OBR>
+		(ActionsDefined(actions))*
+	<CBR>
+	
+	{ToolTokenManager.actionsOrConditions = false;return actions;}
+}
+
+//***********************************************END*****************************************************
+
+//***********************************************Rules Section*******************************************
+
+//Rules SECTION
+ArrayList<String> RuleCondition():{
+	String condition;
+	ArrayList<String> ruleConditions = new ArrayList<String>();
+}{
+	<FSLSH> condition = ConditionName(){ruleConditions.add(condition);} 
+		 (<ANDAND>  condition = ConditionName(){ruleConditions.add(condition);})* 
+		//(<OR> | <OROR> | <AND> |
+	{return ruleConditions;}
+}
+
+Rule RulesDefined():{
+	Token t;
+	String ruleEvent;
+	ArrayList<String> ruleCondition;
+	String ruleAction = "";
+	Rule rule;
+}{
+	{rule = new Rule();}
+	t = <STRING>{rule.setRuleName(t.toString());} 
+		<EQ> 
+			ruleEvent = EventName(){rule.setRuleEvent(ruleEvent);}<OPAR> Parameters() <CPAR>
+			(ruleCondition = RuleCondition(){rule.setRuleCondition(ruleCondition);})?
+			"->" <OBR> 
+		(ruleAction = ActionName(){rule.addRuleAction(ruleAction);})+
+	<CBR>		
+	{return rule;}
+}
+
+Rules RulesMain():{
+	Rules rules;
+	Rule tempRule;
+}{
+	{rules = new Rules();}
+	<RULES> <OBR>
+		(tempRule = RulesDefined(){rules.addRule(tempRule);})+
+	<CBR>
+	{return rules;}
+}
+
+//***********************************************END*****************************************************
+
+//***********************************************GLOBAL**************************************************
+
+//GLOBAL
+Global GlobalMain():{
+	Global global;
+	Events events;
+	Timers timers = null;
+	States states;
+	Actions actions;
+	Rules rules;
+	
+	Conditions conditions;
+}{
+	{global = new Global();}
+	<GLOBAL> <OBR> 	
+		(timers = TimersMain() {global.setTimers(timers);})?
+		(states = StatesMain() {global.setStates(states);})
+		(events =EventsMain(timers) {global.setEvents(events);})
+		(conditions = ConditionsMain() {global.setConditions(conditions);})
+		(actions = ActionsMain(){global.setActions(actions);})
+		(rules = RulesMain(){global.setRules(rules);})	
+	<CBR>
+	{return global;}
+}
+
+//***********************************************END*****************************************************
+//BackTracking... 
+//SimpleNode Program():{}{
+//	ImportsMain()
+//	GlobalMain() 
+//	<EOF>
+//	{return jjtThis;}
+//}
+
+Program Program():{
+	Program p;
+	Imports imp;
+	Global global;
+}{
+	
+	imp = ImportsMain(){
+		p = new Program(); 
+		p.setAllImports(imp);
+	}
+	global = GlobalMain() {p.setGlobal(global);}
+	<EOF>
+	{return p;}
+}

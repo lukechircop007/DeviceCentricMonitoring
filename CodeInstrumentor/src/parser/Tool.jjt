@@ -1,0 +1,174 @@
+options{
+  FORCE_LA_CHECK = true;
+  COMMON_TOKEN_ACTION = true;
+  static = false;
+}
+
+PARSER_BEGIN(Tool)
+package parser;
+import java.io.FileInputStream;
+import Instrumentor.InstrumentorMain;
+import states.*;
+
+public class Tool
+{
+	
+	public static void main( String[] args ){
+		 try{
+                    InstrumentorMain inst = new InstrumentorMain();
+                	HashMap<String,String> settingsList;
+            		try {
+            			settingsList = inst.loadSettings();		
+            			System.setIn(new FileInputStream(settingsList.get("instrumentationCodeLocation")+"/RuntimeMonitor/ApplicationSide/EventInstrumentations.txt"));
+            		} catch (Exception e) {
+            			System.out.println("Error while trying to load Settings... "+e.getMessage());
+            		}                	
+                    Tool parser = new Tool( System.in );
+                    ClassRepresentation n = parser.Program();
+                    inst.startInstrumentation(n);
+          }catch(Exception e){
+                    System.out.println("Error: "+e);
+          }
+	}
+}
+
+PARSER_END(Tool)
+
+<DEFAULT> SKIP:{
+	 " " 
+	| "\n"
+	| "\r"
+	| "r\n"
+	| "\t"
+	| < "//" (~[ "\n", "\r" ])
+			*("\n" | "\r" | "\r\n") >
+	| < "/*" (~[ "*" ])*
+			"*"(~[ "/" ] (~[ "*" ])*
+			"*")*"/" >
+}
+
+<DEFAULT> TOKEN:{
+	  <OBR: "(">
+	| <CBR : ")">
+	| <COMMA: "," >
+	| <STAR: "*" >
+	| <CALL : "@before" | "@after">
+	| <CLASS: "@Class:"> 
+	| <INSTANCE: "@Instance:" > 
+	| <EVENT: "@Event:" > 
+	| <STRCODE: "@Code:" > :CODEREADING
+}
+
+<DEFAULT> TOKEN:{
+	 < #DIGIT   : ["0" - "9"] >
+	|< INTEGER  : (< DIGIT >)+ >	
+	|< #LETTER  : ["a"-"z"] | ["A"-"Z"] >
+	|< STRING   : <LETTER> ( <LETTER> | <INTEGER> | "_")* > 
+}
+
+<CODEREADING> TOKEN: {	
+	<ENDCODE: "@EndCode" > : DEFAULT
+	| <CODE: ~[] >
+}
+
+TOKEN_MGR_DECLS:{
+	
+	void CommonTokenAction(Token t){
+		//System.out.println("Token: "+t.toString());
+	}
+}
+//****************************************FIN************************************************************
+
+String Class():{
+	Token t;
+}{
+	<CLASS> t = <STRING>
+	{return t.toString();}
+}
+
+String Instance():{
+	Token t;
+}{
+	<INSTANCE> (t = <STAR> | t = <STRING>)
+	{return t.toString();}
+}
+
+String Type():{
+	Token t;
+}{
+	t= <STRING>
+	{return t.toString();}
+}
+
+Parameters Parameters():{
+	String tt;
+	Token t;
+	Parameters parameter;
+}{
+	{parameter = new Parameters();}
+	(
+	 ( 
+	  (tt = Type(){parameter.addParameterType(tt);} 
+	   t = <STRING>{parameter.addParameterName(t.toString());} 
+	  )| 
+	  t = <STAR> {parameter.setStar();} 
+	 ) 
+	 (<COMMA>
+	  (
+	   (tt = Type(){parameter.addParameterType(tt);}
+	    t = <STRING>{parameter.addParameterName(t.toString());}
+	   )| 
+	  t = <STAR> {parameter.setStar();}  
+	  ) 
+	 )*
+	)?
+	{return parameter;}
+}
+
+void Event(InstrumentationEvent instEvent):{
+	Token t;
+	Parameters param;
+}{
+	<EVENT> 
+	t = <STRING>{instEvent.setEventName(t.toString());} 
+	<OBR> 
+		param = Parameters(){instEvent.setEventParameters(param);} 
+	<CBR>
+}
+
+String Code():{
+	Token t;
+	String code = "";
+}{
+	<STRCODE>
+		(t = <CODE>{code += t.toString();})*
+	<ENDCODE>
+	{return code;}
+}
+
+void Start(ClassRepresentation clsRep):{
+	Token t;
+	String className;
+	String temp;
+	InstrumentationEvent instEvent;
+}{
+	(
+		{instEvent = new InstrumentationEvent();}
+		t = <CALL> {instEvent.setPointOfInstrumentation(t.toString());}
+		className = Class()
+		temp = Instance(){instEvent.setEventInstance(temp);}
+		Event(instEvent)
+		temp = Code(){instEvent.setCodeToBeInstrumented(temp);}
+		{clsRep.addInstrumentation(className,instEvent);}
+	)*
+}
+
+
+ClassRepresentation Program():{
+	ClassRepresentation clsRep;
+}{
+	{clsRep = new ClassRepresentation();}
+	Start(clsRep)
+	<EOF>
+	{return clsRep;}
+}
